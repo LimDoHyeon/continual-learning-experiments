@@ -15,18 +15,21 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 
-from ...datamodule.dataloader import AllDataLoader, LoaderConfig
+from ...datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
 from ...datamodule.dataset import CLASSES
 from ...losses.ce import build_cross_entropy_loss
 from ...metrics.acc import top1_accuracy
 from ...models.titans.src.titan_backbone import make_titan_block
 
+DOMAIN_CHOICES = ("europe6", "lisbon", "lyon", "prague", "korea", "all")
+
 
 class ASCDataModule(pl.LightningDataModule):
-    def __init__(self, cfg: Dict[str, Any], label2idx: Dict[str, int]):
+    def __init__(self, cfg: Dict[str, Any], label2idx: Dict[str, int], dataset_name: str):
         super().__init__()
         self.cfg = cfg
         self.label2idx = label2idx
+        self.dataset_name = dataset_name
         self.train_loader = None
         self.val_loader = None
         self.test_loader = None
@@ -86,12 +89,35 @@ class ASCDataModule(pl.LightningDataModule):
             "korea_csv": dcfg.get("korea_csv", "cochlscene_meta.csv"),
         }
 
+        use_all_loader = self.dataset_name == "all"
+
         if self.train_loader is None:
-            self.train_loader = AllDataLoader(cfg=self._loader_cfg(split="train", shuffle=True), **common_kwargs).dataloader
+            if use_all_loader:
+                self.train_loader = AllDataLoader(cfg=self._loader_cfg(split="train", shuffle=True), **common_kwargs).dataloader
+            else:
+                self.train_loader = SingleDataLoader(
+                    dataset_name=self.dataset_name,
+                    cfg=self._loader_cfg(split="train", shuffle=True),
+                    **common_kwargs,
+                ).dataloader
         if self.val_loader is None:
-            self.val_loader = AllDataLoader(cfg=self._loader_cfg(split="val", shuffle=False), **common_kwargs).dataloader
+            if use_all_loader:
+                self.val_loader = AllDataLoader(cfg=self._loader_cfg(split="val", shuffle=False), **common_kwargs).dataloader
+            else:
+                self.val_loader = SingleDataLoader(
+                    dataset_name=self.dataset_name,
+                    cfg=self._loader_cfg(split="val", shuffle=False),
+                    **common_kwargs,
+                ).dataloader
         if self.test_loader is None:
-            self.test_loader = AllDataLoader(cfg=self._loader_cfg(split="test", shuffle=False), **common_kwargs).dataloader
+            if use_all_loader:
+                self.test_loader = AllDataLoader(cfg=self._loader_cfg(split="test", shuffle=False), **common_kwargs).dataloader
+            else:
+                self.test_loader = SingleDataLoader(
+                    dataset_name=self.dataset_name,
+                    cfg=self._loader_cfg(split="test", shuffle=False),
+                    **common_kwargs,
+                ).dataloader
 
     def train_dataloader(self):
         return self.train_loader
@@ -236,10 +262,17 @@ def build_logger(cfg: Dict[str, Any], workspace: Path, wandb_id: Optional[str]):
     return CSVLogger(save_dir=str(workspace), name="csv_logs")
 
 
-def main(config_path: str, resume: Optional[str], workspace_path: str, wandb_id: Optional[str]) -> None:
+def main(
+    config_path: str,
+    resume: Optional[str],
+    workspace_path: str,
+    wandb_id: Optional[str],
+    dataset_name: str,
+) -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     assert isinstance(cfg, dict)
+    assert dataset_name in DOMAIN_CHOICES
 
     workspace = Path(workspace_path)
     workspace.mkdir(parents=True, exist_ok=True)
@@ -249,7 +282,7 @@ def main(config_path: str, resume: Optional[str], workspace_path: str, wandb_id:
     label_names = cfg.get("dataset", {}).get("label_names", list(CLASSES.keys()))
     label2idx = {name: idx for idx, name in enumerate(label_names)}
 
-    datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx)
+    datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx, dataset_name=dataset_name)
     system = ASCTitanMAGSystem(cfg=cfg, num_classes=len(label2idx))
 
     checkpoint_callback = ModelCheckpoint(
@@ -288,6 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--resume", type=str, default=None)
     parser.add_argument("-w", "--workspace", type=str, default="outputs/train_asc_titanmag")
     parser.add_argument("-id", "--wandb-id", type=str, default=None)
+    parser.add_argument("-d", "--dataset", type=str, default="all", choices=DOMAIN_CHOICES)
     args = parser.parse_args()
 
     main(
@@ -295,4 +329,5 @@ if __name__ == "__main__":
         resume=args.resume,
         workspace_path=args.workspace,
         wandb_id=args.wandb_id,
+        dataset_name=args.dataset,
     )
