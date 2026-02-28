@@ -14,6 +14,7 @@ from torch.nn.utils.rnn import pad_sequence
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from lightning.pytorch.strategies import DDPStrategy
 
 from ...datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
 from ...datamodule.dataset import CLASSES
@@ -298,9 +299,25 @@ def main(
     logger = build_logger(cfg=cfg, workspace=workspace, wandb_id=wandb_id)
 
     tcfg = cfg["train"]
+    devices_cfg = tcfg.get("devices", "auto")
+    is_multi_device = False
+    if isinstance(devices_cfg, int):
+        is_multi_device = devices_cfg > 1
+    elif isinstance(devices_cfg, (list, tuple)):
+        is_multi_device = len(devices_cfg) > 1
+    elif devices_cfg == "auto":
+        accelerator_cfg = str(tcfg.get("accelerator", "auto"))
+        if accelerator_cfg in {"auto", "gpu", "cuda"}:
+            is_multi_device = torch.cuda.device_count() > 1
+
+    strategy = tcfg.get("strategy", "auto")
+    if strategy == "auto" and is_multi_device:
+        strategy = DDPStrategy(find_unused_parameters=bool(tcfg.get("find_unused_parameters", True)))
+
     trainer = pl.Trainer(
         accelerator=tcfg.get("accelerator", "auto"),
-        devices=tcfg.get("devices", "auto"),
+        devices=devices_cfg,
+        strategy=strategy,
         max_epochs=int(tcfg["max_epochs"]),
         precision=tcfg.get("precision", "32-true"),
         gradient_clip_val=float(tcfg.get("gradient_clip_val", 0.0)),

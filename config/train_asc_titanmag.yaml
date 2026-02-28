@@ -64,6 +64,8 @@ scheduler:
 train:
   accelerator: auto
   devices: auto
+  strategy: auto
+  find_unused_parameters: true
   max_epochs: 30
   precision: 32-true
   gradient_clip_val: 1.0
