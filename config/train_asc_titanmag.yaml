@@ -8,15 +8,15 @@ dataset:
   persistent_workers: true
   prefetch_factor: 2
 
-  europe6_root: /datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development
+  europe6_root: datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development
   europe6_meta: meta.csv
 
-  tau2019_root: /datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development
+  tau2019_root: datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development
   lisbon_meta: lisbon_meta.csv
   lyon_meta: lyon_meta.csv
   prague_meta: prague_meta.csv
 
-  korea_root: /datasets/data/CochlScene/CochlScene
+  korea_root: datasets/data/CochlScene/CochlScene
   korea_csv: cochlscene_meta.csv
 
   label_names:
