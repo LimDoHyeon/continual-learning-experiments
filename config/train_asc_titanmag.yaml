@@ -43,7 +43,7 @@ model:
   head_dim: 48
   window_size: 8
   num_persistent: 32
-  store_chunk_size: 2048
+  store_chunk_size: 256
   max_ltm_lr: 0.002
   ttt_batch_size: 2048
   max_grad_norm: 1.0
@@ -65,7 +65,7 @@ train:
   accelerator: auto
   devices: auto
   strategy: auto
-  find_unused_parameters: true
+  find_unused_parameters: false
   max_epochs: 30
   precision: 32-true
   gradient_clip_val: 1.0

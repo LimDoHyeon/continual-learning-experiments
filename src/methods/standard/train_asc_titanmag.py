@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,6 +24,33 @@ from ...metrics.acc import top1_accuracy
 from ...models.titans.src.titan_backbone import make_titan_block
 
 DOMAIN_CHOICES = ("europe6", "lisbon", "lyon", "prague", "korea", "all")
+
+
+def apply_lightning_pytree_compat_patch() -> None:
+    try:
+        import lightning.pytorch.utilities._pytree as lpt
+        import torch.utils._pytree as tp
+    except Exception:
+        return
+
+    tree_spec_cls = getattr(tp, "TreeSpec", None)
+    leaf_spec_cls = getattr(tp, "LeafSpec", None)
+    if tree_spec_cls is None:
+        return
+
+    class _CompatLeafSpecMeta(type):
+        def __instancecheck__(cls, instance):
+            if isinstance(instance, tree_spec_cls):
+                return instance.is_leaf()
+            if leaf_spec_cls is not None:
+                return isinstance(instance, leaf_spec_cls)
+            return False
+
+    class _CompatLeafSpec(metaclass=_CompatLeafSpecMeta):
+        pass
+
+    if hasattr(lpt, "LeafSpec"):
+        setattr(lpt, "LeafSpec", _CompatLeafSpec)
 
 
 class ASCDataModule(pl.LightningDataModule):
@@ -299,6 +327,11 @@ def main(
     logger = build_logger(cfg=cfg, workspace=workspace, wandb_id=wandb_id)
 
     tcfg = cfg["train"]
+    # Ensure DDP subprocess uses its own CUDA device before process-group init.
+    if torch.cuda.is_available() and "LOCAL_RANK" in os.environ:
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+    apply_lightning_pytree_compat_patch()
+
     devices_cfg = tcfg.get("devices", "auto")
     is_multi_device = False
     if isinstance(devices_cfg, int):
@@ -312,7 +345,7 @@ def main(
 
     strategy = tcfg.get("strategy", "auto")
     if strategy == "auto" and is_multi_device:
-        strategy = DDPStrategy(find_unused_parameters=bool(tcfg.get("find_unused_parameters", True)))
+        strategy = DDPStrategy(find_unused_parameters=bool(tcfg.get("find_unused_parameters", False)))
 
     trainer = pl.Trainer(
         accelerator=tcfg.get("accelerator", "auto"),
