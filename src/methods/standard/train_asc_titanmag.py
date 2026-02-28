@@ -78,7 +78,6 @@ class ASCDataModule(pl.LightningDataModule):
             "target_sample_rate": int(dcfg["target_sample_rate"]),
             "return_path": False,
             "collate_fn": self._collate_batch,
-            "return_domain": False,
             "europe6_root": dcfg["europe6_root"],
             "europe6_meta": dcfg.get("europe6_meta", "meta.csv"),
             "tau2019_root": dcfg["tau2019_root"],
@@ -88,12 +87,13 @@ class ASCDataModule(pl.LightningDataModule):
             "korea_root": dcfg["korea_root"],
             "korea_csv": dcfg.get("korea_csv", "cochlscene_meta.csv"),
         }
+        all_loader_kwargs = {**common_kwargs, "return_domain": False}
 
         use_all_loader = self.dataset_name == "all"
 
         if self.train_loader is None:
             if use_all_loader:
-                self.train_loader = AllDataLoader(cfg=self._loader_cfg(split="train", shuffle=True), **common_kwargs).dataloader
+                self.train_loader = AllDataLoader(cfg=self._loader_cfg(split="train", shuffle=True), **all_loader_kwargs).dataloader
             else:
                 self.train_loader = SingleDataLoader(
                     dataset_name=self.dataset_name,
@@ -102,7 +102,7 @@ class ASCDataModule(pl.LightningDataModule):
                 ).dataloader
         if self.val_loader is None:
             if use_all_loader:
-                self.val_loader = AllDataLoader(cfg=self._loader_cfg(split="val", shuffle=False), **common_kwargs).dataloader
+                self.val_loader = AllDataLoader(cfg=self._loader_cfg(split="val", shuffle=False), **all_loader_kwargs).dataloader
             else:
                 self.val_loader = SingleDataLoader(
                     dataset_name=self.dataset_name,
@@ -111,7 +111,7 @@ class ASCDataModule(pl.LightningDataModule):
                 ).dataloader
         if self.test_loader is None:
             if use_all_loader:
-                self.test_loader = AllDataLoader(cfg=self._loader_cfg(split="test", shuffle=False), **common_kwargs).dataloader
+                self.test_loader = AllDataLoader(cfg=self._loader_cfg(split="test", shuffle=False), **all_loader_kwargs).dataloader
             else:
                 self.test_loader = SingleDataLoader(
                     dataset_name=self.dataset_name,
