@@ -51,21 +51,20 @@ class SingleDataLoader:
         self,
         dataset_name: str,
         label2idx: Dict[str, int],
+        europe6_root: str,
+        europe6_meta: str,
+        tau2019_root: str,
+        lisbon_meta: str,
+        lyon_meta: str,
+        prague_meta: str,
+        korea_root: str,
+        korea_csv: str,
         cfg: Optional[LoaderConfig] = None,
         seed: int = 42,
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
         collate_fn: Optional[Callable] = None,
-        # optional roots / meta overrides
-        europe6_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development",
-        europe6_meta: str = "meta.csv",
-        tau2019_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        lisbon_meta: str = "lisbon_meta.csv",
-        lyon_meta: str = "lyon_meta.csv",
-        prague_meta: str = "prague_meta.csv",
-        korea_root: str = "/datasets/data/CochlScene/CochlScene",
-        korea_csv: str = "cochlscene_meta.csv",
     ):
         self.dataset_name = dataset_name.lower().strip()
         assert self.dataset_name in self._NAME2CLS
@@ -185,6 +184,14 @@ class AllDataLoader:
     def __init__(
         self,
         label2idx: Dict[str, int],
+        europe6_root: str,
+        europe6_meta: str,
+        tau2019_root: str,
+        lisbon_meta: str,
+        lyon_meta: str,
+        prague_meta: str,
+        korea_root: str,
+        korea_csv: str,
         cfg: Optional[LoaderConfig] = None,
         seed: int = 42,
         target_sample_rate: Optional[int] = None,
@@ -192,15 +199,6 @@ class AllDataLoader:
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
         collate_fn: Optional[Callable] = None,
         return_domain: bool = False,
-        # path overrides
-        europe6_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development",
-        europe6_meta: str = "meta.csv",
-        tau2019_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        lisbon_meta: str = "lisbon_meta.csv",
-        lyon_meta: str = "lyon_meta.csv",
-        prague_meta: str = "prague_meta.csv",
-        korea_root: str = "/datasets/data/CochlScene/CochlScene",
-        korea_csv: str = "cochlscene_meta.csv",
     ):
         self.label2idx = label2idx
         self.cfg = cfg or LoaderConfig()

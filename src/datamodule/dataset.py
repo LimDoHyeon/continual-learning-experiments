@@ -26,8 +26,8 @@ class TAUDatasetConfig:
 
 @dataclass(frozen=True)
 class KoreaDatasetConfig:
-    data_root: str = "/datasets/data/CochlScene/CochlScene"  # CochlScene/CochlScene 경로
-    csv_name: str = "cochlscene_meta.csv"
+    data_root: str  # CochlScene/CochlScene 경로
+    csv_name: str
     split: str = "Train"  # "Train" | "Val" | "Test"
     return_path: bool = False
     target_sample_rate: Optional[int] = 16000  # 예: 16000, None이면 원본 유지
@@ -194,9 +194,9 @@ class Europe6Dataset(TAUDatasetBase):
         self,
         split: str,
         label2idx: Dict[str, int],
+        data_root: str,
+        meta_csv: str,
         seed: int = 42,
-        data_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development",
-        meta_csv: str = "meta.csv",
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
@@ -218,9 +218,9 @@ class LisbonDataset(TAUDatasetBase):
         self,
         split: str,
         label2idx: Dict[str, int],
+        data_root: str,
+        meta_csv: str,
         seed: int = 42,
-        data_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        meta_csv: str = "lisbon_meta.csv",
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
@@ -242,9 +242,9 @@ class LyonDataset(TAUDatasetBase):
         self,
         split: str,
         label2idx: Dict[str, int],
+        data_root: str,
+        meta_csv: str,
         seed: int = 42,
-        data_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        meta_csv: str = "lyon_meta.csv",
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
@@ -266,9 +266,9 @@ class PragueDataset(TAUDatasetBase):
         self,
         split: str,
         label2idx: Dict[str, int],
+        data_root: str,
+        meta_csv: str,
         seed: int = 42,
-        data_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        meta_csv: str = "prague_meta.csv",
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
@@ -355,19 +355,19 @@ class AllDataset(Dataset):
         self,
         split: str,
         label2idx: Dict[str, int],
+        europe6_root: str,
+        europe6_meta: str,
+        tau2019_root: str,
+        lisbon_meta: str,
+        lyon_meta: str,
+        prague_meta: str,
+        korea_root: str,
+        korea_csv: str,
         seed: int = 42,
         target_sample_rate: Optional[int] = None,
         return_path: bool = False,
         transform: Optional[Callable[[torch.Tensor, int], Any]] = None,
         return_domain: bool = False,
-        europe6_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development",
-        europe6_meta: str = "meta.csv",
-        tau2019_root: str = "/datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development",
-        lisbon_meta: str = "lisbon_meta.csv",
-        lyon_meta: str = "lyon_meta.csv",
-        prague_meta: str = "prague_meta.csv",
-        korea_root: str = "/datasets/data/CochlScene/CochlScene",
-        korea_csv: str = "cochlscene_meta.csv",
     ):
         split_l = split.lower()
         assert split_l in {"train", "val", "test"}
