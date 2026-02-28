@@ -20,7 +20,6 @@ class TAUDatasetConfig:
     meta_csv: str  # meta.csv or lisbon_meta.csv ...
     split: str = "train"  # "train" | "val" | "test"
     seed: int = 42
-    audio_dir: str = "audio"
     target_sample_rate: Optional[int] = None
     return_path: bool = False
 
@@ -121,10 +120,8 @@ class TAUDatasetBase(Dataset):
 
         self.data_root = Path(cfg.data_root)
         self.meta_path = self.data_root / cfg.meta_csv
-        self.audio_root = self.data_root / cfg.audio_dir
 
         assert self.meta_path.exists()
-        assert self.audio_root.exists()
 
         df = _read_meta(self.meta_path)
 
@@ -169,7 +166,7 @@ class TAUDatasetBase(Dataset):
         label_str = self._all_labels_str[idx]
         label = self.label2idx[label_str]
 
-        wav_path = self.audio_root / rel
+        wav_path = self.data_root / rel
         waveform, sr = torchaudio.load(wav_path)
         waveform, sr = self._maybe_resample(waveform, sr)
 
@@ -206,7 +203,6 @@ class Europe6Dataset(TAUDatasetBase):
             meta_csv=meta_csv,
             split=split,
             seed=seed,
-            audio_dir="audio",
             target_sample_rate=target_sample_rate,
             return_path=return_path,
         )
@@ -230,7 +226,6 @@ class LisbonDataset(TAUDatasetBase):
             meta_csv=meta_csv,
             split=split,
             seed=seed,
-            audio_dir="audio",
             target_sample_rate=target_sample_rate,
             return_path=return_path,
         )
@@ -254,7 +249,6 @@ class LyonDataset(TAUDatasetBase):
             meta_csv=meta_csv,
             split=split,
             seed=seed,
-            audio_dir="audio",
             target_sample_rate=target_sample_rate,
             return_path=return_path,
         )
@@ -278,7 +272,6 @@ class PragueDataset(TAUDatasetBase):
             meta_csv=meta_csv,
             split=split,
             seed=seed,
-            audio_dir="audio",
             target_sample_rate=target_sample_rate,
             return_path=return_path,
         )
