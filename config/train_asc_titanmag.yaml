@@ -1,0 +1,79 @@
+seed: 42
+
+dataset:
+  target_sample_rate: 16000
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+
+  europe6_root: /datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development
+  europe6_meta: meta.csv
+
+  tau2019_root: /datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development
+  lisbon_meta: lisbon_meta.csv
+  lyon_meta: lyon_meta.csv
+  prague_meta: prague_meta.csv
+
+  korea_root: /datasets/data/CochlScene/CochlScene
+  korea_csv: cochlscene_meta.csv
+
+  label_names:
+    - airport
+    - bus
+    - metro
+    - metro_station
+    - park
+    - public_square
+    - shopping_mall
+    - street_pedestrian
+    - street_traffic
+    - tram
+
+model:
+  sample_rate: 16000
+  n_fft: 1024
+  win_length: 1024
+  hop_length: 320
+  n_mels: 128
+
+  dim: 384
+  heads: 8
+  head_dim: 48
+  window_size: 8
+  num_persistent: 32
+  store_chunk_size: 2048
+  max_ltm_lr: 0.002
+  ttt_batch_size: 2048
+  max_grad_norm: 1.0
+  test_time_update: true
+
+loss:
+  label_smoothing: 0.0
+
+optimizer:
+  lr: 0.0002
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+
+scheduler:
+  eta_min: 0.000001
+
+train:
+  accelerator: auto
+  devices: auto
+  max_epochs: 30
+  precision: 32-true
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+  deterministic: false
+
+logging:
+  use_wandb: true
+  project: dcase2026t7
+  run_name: train_asc_titanmag
+  monitor: val_acc
+  mode: max
+  save_top_k: 1
