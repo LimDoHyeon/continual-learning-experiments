@@ -152,24 +152,18 @@ class TitanASCModel(nn.Module):
         self.to_db = torchaudio.transforms.AmplitudeToDB(stype="power", top_db=80)
 
         self.input_proj = nn.Linear(self.n_mels, self.embed_dim)
-        num_blocks = int(mcfg.get("num_titan_blocks", 1))
-        self.backbone = nn.ModuleList(
-            [
-                make_titan_block(
-                    dim=self.embed_dim,
-                    heads=int(mcfg["heads"]),
-                    head_dim=int(mcfg["head_dim"]),
-                    window_size=int(mcfg["window_size"]),
-                    num_persistent=int(mcfg["num_persistent"]),
-                    store_chunk_size=int(mcfg["store_chunk_size"]),
-                    max_ltm_lr=float(mcfg["max_ltm_lr"]),
-                    ttt_batch_size=int(mcfg["ttt_batch_size"]),
-                    max_grad_norm=float(mcfg["max_grad_norm"]),
-                    test_time_update=bool(mcfg.get("test_time_update", True)),
-                    use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
-                )
-                for _ in range(num_blocks)
-            ]
+        self.backbone = make_titan_block(
+            dim=self.embed_dim,
+            heads=int(mcfg["heads"]),
+            head_dim=int(mcfg["head_dim"]),
+            window_size=int(mcfg["window_size"]),
+            num_persistent=int(mcfg["num_persistent"]),
+            store_chunk_size=int(mcfg["store_chunk_size"]),
+            max_ltm_lr=float(mcfg["max_ltm_lr"]),
+            ttt_batch_size=int(mcfg["ttt_batch_size"]),
+            max_grad_norm=float(mcfg["max_grad_norm"]),
+            test_time_update=bool(mcfg.get("test_time_update", True)),
+            use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
         )
         self.norm = nn.LayerNorm(self.embed_dim)
         self.classifier = nn.Linear(self.embed_dim, num_classes)
@@ -185,9 +179,7 @@ class TitanASCModel(nn.Module):
         tokens = self.input_proj(mel.transpose(1, 2))
 
         mask = self._frame_mask(lengths=lengths, n_frames=tokens.shape[1], device=tokens.device)
-        features = tokens
-        for block in self.backbone:
-            features = block(features, attn_mask=mask)
+        features = self.backbone(tokens, attn_mask=mask)
         features = self.norm(features)
 
         denom = mask.sum(dim=1, keepdim=True).clamp(min=1).to(features.dtype)

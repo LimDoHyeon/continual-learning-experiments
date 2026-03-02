@@ -49,7 +49,6 @@ model:
   max_grad_norm: 1.0
   test_time_update: true
   use_accelerated_scan: false
-  num_titan_blocks: 3
 
 loss:
   label_smoothing: 0.0
