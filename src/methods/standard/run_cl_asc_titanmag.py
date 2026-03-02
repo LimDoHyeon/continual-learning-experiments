@@ -79,7 +79,7 @@ def run_continual(
         cfg["train"]["max_epochs"] = 30
         cfg.setdefault("logging", {})
         cfg["logging"]["save_top_k"] = 0
-        cfg["logging"]["run_name"] = f"cl_asc_titanmag_{domain}"
+        cfg["logging"]["run_name"] = f"cl_train_asc_titanmag_{domain}"
         if disable_wandb:
             cfg["logging"]["use_wandb"] = False
 
@@ -112,6 +112,14 @@ def run_continual(
         )
 
         trainer.fit(model=system, datamodule=datamodule)
+
+        if bool(cfg["logging"].get("use_wandb", True)):
+            try:
+                import wandb
+
+                wandb.finish()
+            except ImportError:
+                pass
 
         stage_last_ckpt = run_dir / "checkpoints" / "last.ckpt"
         if not stage_last_ckpt.exists():
