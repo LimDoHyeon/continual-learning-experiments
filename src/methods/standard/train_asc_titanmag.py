@@ -335,7 +335,10 @@ def main(
     )
 
     trainer.fit(system, datamodule=datamodule, ckpt_path=resume)
-    trainer.test(system, datamodule=datamodule, ckpt_path="best")
+    # Test using a checkpoint chosen by config. Prefer "last" for reproducibility.
+    # Allowed values: "best", "last", or an explicit checkpoint path.
+    test_ckpt = str(tcfg.get("test_ckpt", "last"))
+    trainer.test(system, datamodule=datamodule, ckpt_path=test_ckpt)
 
 
 if __name__ == "__main__":
