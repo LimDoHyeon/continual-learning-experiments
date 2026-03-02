@@ -166,7 +166,7 @@ class TitanASCModel(nn.Module):
                     ttt_batch_size=int(mcfg["ttt_batch_size"]),
                     max_grad_norm=float(mcfg["max_grad_norm"]),
                     test_time_update=bool(mcfg.get("test_time_update", True)),
-                    use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
+                    # use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
                 )
                 for _ in range(num_blocks)
             ]
