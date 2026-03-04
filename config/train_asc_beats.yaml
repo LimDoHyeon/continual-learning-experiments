@@ -1,0 +1,82 @@
+seed: 42
+
+dataset:
+  target_sample_rate: 16000
+  batch_size: 4
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+
+  europe6_root: datasets/data/TAU-urban-acoustic-scenes-2020-mobile-development/TAU-urban-acoustic-scenes-2020-mobile-development
+  europe6_meta: meta.csv
+
+  tau2019_root: datasets/data/TAU-urban-acoustic-scenes-2019-development/TAU-urban-acoustic-scenes-2019-development
+  lisbon_meta: lisbon_meta.csv
+  lyon_meta: lyon_meta.csv
+  prague_meta: prague_meta.csv
+
+  korea_root: datasets/data/CochlScene/CochlScene
+  korea_csv: cochlscene_meta.csv
+
+  label_names:
+    - airport
+    - bus
+    - metro
+    - metro_station
+    - park
+    - public_square
+    - shopping_mall
+    - street_pedestrian
+    - street_traffic
+    - tram
+
+model:
+  checkpoint_path: checkpoints/BEATs_iter3_plus_AS2M.pt
+  freeze_backbone: false
+  max_layer: null
+  dim: 768
+  dropout: 0.0
+
+loss:
+  label_smoothing: 0.0
+
+plasticity:
+  enabled: false
+  activation: relu
+  head_hidden_dim: 768
+  replacement_rate: 0.001
+  maturity_threshold: 100
+  decay_rate: 0.9
+  util_type: contribution
+  init: kaiming
+  accumulate: false
+
+optimizer:
+  lr: 0.00002
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+
+scheduler:
+  eta_min: 0.000001
+
+train:
+  accelerator: auto
+  devices: auto
+  strategy: auto
+  find_unused_parameters: true
+  max_epochs: 30
+  precision: 32-true
+  gradient_clip_val: 1.0
+  log_every_n_steps: 20
+  deterministic: false
+  test_ckpt: last
+
+logging:
+  use_wandb: true
+  project: dcase2026t7
+  run_name: train_asc_beats
+  monitor: val_acc
+  mode: max
+  save_top_k: 1
