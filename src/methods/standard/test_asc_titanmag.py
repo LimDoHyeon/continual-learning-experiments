@@ -3,15 +3,27 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import lightning.pytorch as pl
+import matplotlib.pyplot as plt
 import torch
 import yaml
 from lightning.pytorch.strategies import DDPStrategy
 
 from ...datamodule.dataset import CLASSES
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
+
+DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")
+
+
+def _extract_test_acc(metrics: Dict[str, Any]) -> float:
+    if "test_acc" in metrics:
+        return float(metrics["test_acc"])
+    for key, value in metrics.items():
+        if key.endswith("test_acc"):
+            return float(value)
+    raise KeyError(f"test_acc metric not found in metrics keys: {list(metrics.keys())}")
 
 
 def main(
@@ -32,14 +44,6 @@ def main(
 
     label_names = cfg.get("dataset", {}).get("label_names", list(CLASSES.keys()))
     label2idx = {name: idx for idx, name in enumerate(label_names)}
-
-    datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx, dataset_name=dataset_name)
-    system = ASCTitanMAGSystem.load_from_checkpoint(
-        checkpoint_path,
-        cfg=cfg,
-        num_classes=len(label2idx),
-        map_location="cpu",
-    )
 
     tcfg: Dict[str, Any] = cfg["train"]
     if torch.cuda.is_available() and "LOCAL_RANK" in os.environ:
@@ -70,7 +74,45 @@ def main(
         logger=False,
     )
 
-    trainer.test(model=system, datamodule=datamodule)
+    test_domains: List[str] = list(DOMAIN_SEQUENCE) if dataset_name == "all" else [dataset_name]
+    domain_acc: Dict[str, float] = {}
+
+    for domain in test_domains:
+        print(f"[TEST] domain={domain}, checkpoint={checkpoint_path}")
+        datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx, dataset_name=domain)
+        system = ASCTitanMAGSystem.load_from_checkpoint(
+            checkpoint_path,
+            cfg=cfg,
+            num_classes=len(label2idx),
+            map_location="cpu",
+        )
+        test_results = trainer.test(model=system, datamodule=datamodule)
+        if not test_results:
+            raise RuntimeError(f"No test result returned for domain: {domain}")
+        acc = _extract_test_acc(test_results[0])
+        domain_acc[domain] = acc
+        print(f"[RESULT] {domain}: test_acc={acc:.4f}")
+
+    plots_dir = workspace / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_stem = Path(checkpoint_path).stem
+    plot_path = plots_dir / f"{ckpt_stem}_eval.png"
+
+    x_domains = list(domain_acc.keys())
+    y_acc = [domain_acc[d] for d in x_domains]
+    plt.figure(figsize=(10, 5))
+    bars = plt.bar(x_domains, y_acc, color="steelblue")
+    plt.ylim(0.0, 1.0)
+    plt.xlabel("Domain")
+    plt.ylabel("Accuracy")
+    plt.title(f"Domain-wise Test Accuracy ({ckpt_stem})")
+    for bar, value in zip(bars, y_acc):
+        plt.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.3f}", ha="center", va="bottom")
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=200)
+    plt.close()
+
+    print(f"[PLOT] saved: {plot_path}")
 
 
 if __name__ == "__main__":

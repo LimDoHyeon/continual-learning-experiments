@@ -49,10 +49,22 @@ model:
   max_grad_norm: 1.0
   test_time_update: true
   use_accelerated_scan: false
-  num_titan_blocks: 3
+  num_titan_blocks: 6
+  dropout: 0.1
 
 loss:
   label_smoothing: 0.0
+
+plasticity:
+  enabled: false
+  activation: relu
+  head_hidden_dim: 384
+  replacement_rate: 0.001
+  maturity_threshold: 100
+  decay_rate: 0.9
+  util_type: contribution
+  init: kaiming
+  accumulate: false
 
 optimizer:
   lr: 0.0002
