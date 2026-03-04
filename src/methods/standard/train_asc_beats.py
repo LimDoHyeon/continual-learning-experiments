@@ -262,7 +262,9 @@ class ASCBEATsSystem(pl.LightningModule):
         waveforms, lengths, labels = batch
         if self.use_plasticity:
             logits, cbp_features = self.model(waveforms, lengths, return_cbp_features=True)
-            self._latest_cbp_features = cbp_features
+            # Keep only detached activations so the autograd graph from this
+            # iteration is not kept alive across hooks/DDP bookkeeping.
+            self._latest_cbp_features = [feature.detach() for feature in cbp_features]
         else:
             logits = self(waveforms, lengths)
             self._latest_cbp_features = []
