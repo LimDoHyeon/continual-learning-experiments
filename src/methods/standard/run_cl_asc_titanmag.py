@@ -112,8 +112,9 @@ def run_continual(
         )
 
         trainer.fit(model=system, datamodule=datamodule)
+        trainer.strategy.barrier("fit_end")
 
-        if bool(cfg["logging"].get("use_wandb", True)):
+        if trainer.is_global_zero and bool(cfg["logging"].get("use_wandb", True)):
             try:
                 import wandb
 
@@ -122,11 +123,14 @@ def run_continual(
                 pass
 
         stage_last_ckpt = run_dir / "checkpoints" / "last.ckpt"
-        if not stage_last_ckpt.exists():
-            raise FileNotFoundError(f"last checkpoint was not created: {stage_last_ckpt}")
-
         domain_ckpt = ckpt_dir / f"{domain}.ckpt"
-        shutil.copy2(stage_last_ckpt, domain_ckpt)
+        if trainer.is_global_zero:
+            if not stage_last_ckpt.exists():
+                raise FileNotFoundError(f"last checkpoint was not created: {stage_last_ckpt}")
+            shutil.copy2(stage_last_ckpt, domain_ckpt)
+        trainer.strategy.barrier("ckpt_copy_done")
+        if not domain_ckpt.exists():
+            raise FileNotFoundError(f"domain checkpoint was not created: {domain_ckpt}")
         prev_ckpt = domain_ckpt
 
 
