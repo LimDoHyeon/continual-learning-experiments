@@ -26,6 +26,41 @@ def _extract_test_acc(metrics: Dict[str, Any]) -> float:
     raise KeyError(f"test_acc metric not found in metrics keys: {list(metrics.keys())}")
 
 
+def _load_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise TypeError(f"Unexpected checkpoint format: {type(checkpoint)}")
+    return checkpoint
+
+
+def _align_plasticity_cfg_with_checkpoint(cfg: Dict[str, Any], checkpoint_path: str) -> None:
+    checkpoint = _load_checkpoint(checkpoint_path=checkpoint_path)
+    state_dict = checkpoint.get("state_dict", {})
+    if not isinstance(state_dict, dict):
+        raise TypeError("Checkpoint state_dict is missing or invalid.")
+
+    has_cbp_head = "model.cbp_hidden.weight" in state_dict
+    pcfg = cfg.setdefault("plasticity", {})
+    prev_enabled = bool(pcfg.get("enabled", False))
+    pcfg["enabled"] = has_cbp_head
+
+    if has_cbp_head:
+        cbp_hidden_weight = state_dict["model.cbp_hidden.weight"]
+        if not isinstance(cbp_hidden_weight, torch.Tensor):
+            raise TypeError("model.cbp_hidden.weight in checkpoint is not a tensor.")
+        inferred_hidden_dim = int(cbp_hidden_weight.shape[0])
+        pcfg["head_hidden_dim"] = inferred_hidden_dim
+        pcfg.setdefault("activation", "relu")
+        print(
+            f"[CFG] plasticity enabled from checkpoint (head_hidden_dim={inferred_hidden_dim})."
+        )
+    elif prev_enabled:
+        print("[CFG] plasticity disabled to match checkpoint (no CBP head found).")
+
+
 def main(
     config_path: str,
     checkpoint_path: str,
@@ -36,6 +71,7 @@ def main(
         cfg = yaml.safe_load(f)
     assert isinstance(cfg, dict)
     assert dataset_name in DOMAIN_CHOICES
+    _align_plasticity_cfg_with_checkpoint(cfg=cfg, checkpoint_path=checkpoint_path)
 
     workspace = Path(workspace_path)
     workspace.mkdir(parents=True, exist_ok=True)
