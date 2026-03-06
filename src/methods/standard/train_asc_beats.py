@@ -234,9 +234,6 @@ class ASCBEATsSystem(pl.LightningModule):
         if not self.use_plasticity:
             return
 
-        if int(self.trainer.world_size) > 1:
-            raise RuntimeError("plasticity.enabled currently supports single-device training only.")
-
         optimizer = self.optimizers(use_pl_optimizer=False)
         if isinstance(optimizer, list):
             optimizer = optimizer[0]
