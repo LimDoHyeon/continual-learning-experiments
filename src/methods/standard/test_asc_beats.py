@@ -99,15 +99,16 @@ def _build_test_loader_for_paths(
     domain: str,
 ):
     dcfg = cfg["dataset"]
+    # Use a single-process loader for CSV export stability.
     loader_cfg = LoaderConfig(
         split="test",
         batch_size=int(dcfg["batch_size"]),
-        num_workers=int(dcfg["num_workers"]),
+        num_workers=0,
         shuffle=False,
         drop_last=False,
-        pin_memory=bool(dcfg.get("pin_memory", True)),
-        persistent_workers=bool(dcfg.get("persistent_workers", True)),
-        prefetch_factor=int(dcfg.get("prefetch_factor", 2)),
+        pin_memory=False,
+        persistent_workers=False,
+        prefetch_factor=2,
     )
     loader = SingleDataLoader(
         dataset_name=domain,
@@ -138,8 +139,9 @@ def _collect_sample_rows(
     rows: List[Dict[str, str]] = []
     device = next(system.parameters()).device
     system.eval()
+    print(f"[CSV] collecting rows for domain={domain} on device={device} ...")
     with torch.inference_mode():
-        for waveforms, lengths, labels, paths in dataloader:
+        for batch_idx, (waveforms, lengths, labels, paths) in enumerate(dataloader):
             waveforms = waveforms.to(device)
             lengths = lengths.to(device)
             logits = system(waveforms, lengths)
@@ -154,6 +156,9 @@ def _collect_sample_rows(
                         "sample_path": sample_path,
                     }
                 )
+            if (batch_idx + 1) % 100 == 0:
+                print(f"[CSV] domain={domain} processed_batches={batch_idx + 1}")
+    print(f"[CSV] collected rows for domain={domain}: {len(rows)}")
     return rows
 
 
@@ -236,6 +241,7 @@ def main(
         domain_acc[domain] = acc
         print(f"[RESULT] {domain}: test_acc={acc:.4f}")
         if save_sample_csv:
+            system = system.to(trainer.strategy.root_device)
             path_loader = _build_test_loader_for_paths(cfg=cfg, label2idx=label2idx, domain=domain)
             sample_rows.extend(
                 _collect_sample_rows(system=system, dataloader=path_loader, idx2label=idx2label, domain=domain)
@@ -275,7 +281,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--dataset", type=str, default="all", choices=DOMAIN_CHOICES)
     parser.add_argument(
         "--save-sample-csv",
-        action="store_true",
+        action="store_true", default=True,
         help="Save per-test-sample predictions (pred/gt/path) CSV under workspace/plots.",
     )
     args = parser.parse_args()
