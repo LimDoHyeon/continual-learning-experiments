@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -10,7 +11,9 @@ import matplotlib.pyplot as plt
 import torch
 import yaml
 from lightning.pytorch.strategies import DDPStrategy
+from torch.nn.utils.rnn import pad_sequence
 
+from ...datamodule.dataloader import LoaderConfig, SingleDataLoader
 from ...datamodule.dataset import CLASSES
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
 
@@ -61,11 +64,113 @@ def _align_plasticity_cfg_with_checkpoint(cfg: Dict[str, Any], checkpoint_path: 
         print("[CFG] plasticity disabled to match checkpoint (no CBP head found).")
 
 
+def _collate_batch_with_paths(
+    batch: List[Any],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, List[str]]:
+    waves: List[torch.Tensor] = []
+    labels: List[int] = []
+    paths: List[str] = []
+
+    for sample in batch:
+        if isinstance(sample, tuple) and len(sample) == 2 and isinstance(sample[1], str):
+            item, path = sample
+        else:
+            item, path = sample, ""
+        waveform, label = item
+
+        if waveform.ndim == 2:
+            waveform = waveform[0]
+        elif waveform.ndim > 2:
+            waveform = waveform.reshape(-1)
+
+        waves.append(waveform)
+        labels.append(int(label))
+        paths.append(path)
+
+    lengths = torch.tensor([w.shape[-1] for w in waves], dtype=torch.long)
+    padded = pad_sequence(waves, batch_first=True)
+    label_tensor = torch.tensor(labels, dtype=torch.long)
+    return padded, lengths, label_tensor, paths
+
+
+def _build_test_loader_for_paths(
+    cfg: Dict[str, Any],
+    label2idx: Dict[str, int],
+    domain: str,
+):
+    dcfg = cfg["dataset"]
+    loader_cfg = LoaderConfig(
+        split="test",
+        batch_size=int(dcfg["batch_size"]),
+        num_workers=int(dcfg["num_workers"]),
+        shuffle=False,
+        drop_last=False,
+        pin_memory=bool(dcfg.get("pin_memory", True)),
+        persistent_workers=bool(dcfg.get("persistent_workers", True)),
+        prefetch_factor=int(dcfg.get("prefetch_factor", 2)),
+    )
+    loader = SingleDataLoader(
+        dataset_name=domain,
+        cfg=loader_cfg,
+        label2idx=label2idx,
+        seed=int(cfg.get("seed", 42)),
+        target_sample_rate=int(dcfg["target_sample_rate"]),
+        return_path=True,
+        collate_fn=_collate_batch_with_paths,
+        europe6_root=dcfg["europe6_root"],
+        europe6_meta=dcfg.get("europe6_meta", "meta.csv"),
+        tau2019_root=dcfg["tau2019_root"],
+        lisbon_meta=dcfg.get("lisbon_meta", "lisbon_meta.csv"),
+        lyon_meta=dcfg.get("lyon_meta", "lyon_meta.csv"),
+        prague_meta=dcfg.get("prague_meta", "prague_meta.csv"),
+        korea_root=dcfg["korea_root"],
+        korea_csv=dcfg.get("korea_csv", "cochlscene_meta.csv"),
+    )
+    return loader.dataloader
+
+
+def _collect_sample_rows(
+    system: ASCTitanMAGSystem,
+    dataloader,
+    idx2label: Dict[int, str],
+    domain: str,
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    device = next(system.parameters()).device
+    system.eval()
+    with torch.inference_mode():
+        for waveforms, lengths, labels, paths in dataloader:
+            waveforms = waveforms.to(device)
+            lengths = lengths.to(device)
+            logits = system(waveforms, lengths)
+            preds = torch.argmax(logits, dim=1).detach().cpu().tolist()
+            gt = labels.detach().cpu().tolist()
+            for pred_idx, gt_idx, sample_path in zip(preds, gt, paths):
+                rows.append(
+                    {
+                        "domain": domain,
+                        "pred_class": idx2label.get(int(pred_idx), str(int(pred_idx))),
+                        "gt_class": idx2label.get(int(gt_idx), str(int(gt_idx))),
+                        "sample_path": sample_path,
+                    }
+                )
+    return rows
+
+
+def _save_sample_csv(csv_path: Path, rows: List[Dict[str, str]]) -> None:
+    fieldnames = ["domain", "pred_class", "gt_class", "sample_path"]
+    with csv_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main(
     config_path: str,
     checkpoint_path: str,
     workspace_path: str,
     dataset_name: str,
+    save_sample_csv: bool,
 ) -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -80,6 +185,7 @@ def main(
 
     label_names = cfg.get("dataset", {}).get("label_names", list(CLASSES.keys()))
     label2idx = {name: idx for idx, name in enumerate(label_names)}
+    idx2label = {idx: name for name, idx in label2idx.items()}
 
     tcfg: Dict[str, Any] = cfg["train"]
     if torch.cuda.is_available() and "LOCAL_RANK" in os.environ:
@@ -112,6 +218,7 @@ def main(
 
     test_domains: List[str] = list(DOMAIN_SEQUENCE) if dataset_name == "all" else [dataset_name]
     domain_acc: Dict[str, float] = {}
+    sample_rows: List[Dict[str, str]] = []
 
     for domain in test_domains:
         print(f"[TEST] domain={domain}, checkpoint={checkpoint_path}")
@@ -128,6 +235,11 @@ def main(
         acc = _extract_test_acc(test_results[0])
         domain_acc[domain] = acc
         print(f"[RESULT] {domain}: test_acc={acc:.4f}")
+        if save_sample_csv:
+            path_loader = _build_test_loader_for_paths(cfg=cfg, label2idx=label2idx, domain=domain)
+            sample_rows.extend(
+                _collect_sample_rows(system=system, dataloader=path_loader, idx2label=idx2label, domain=domain)
+            )
 
     plots_dir = workspace / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -149,6 +261,10 @@ def main(
     plt.close()
 
     print(f"[PLOT] saved: {plot_path}")
+    if save_sample_csv:
+        csv_path = plots_dir / f"{ckpt_stem}_sample_predictions.csv"
+        _save_sample_csv(csv_path=csv_path, rows=sample_rows)
+        print(f"[CSV] saved: {csv_path}")
 
 
 if __name__ == "__main__":
@@ -157,6 +273,11 @@ if __name__ == "__main__":
     parser.add_argument("-k", "--checkpoint", type=str, required=True)
     parser.add_argument("-w", "--workspace", type=str, default="workspace/test_asc_titanmag")
     parser.add_argument("-d", "--dataset", type=str, default="all", choices=DOMAIN_CHOICES)
+    parser.add_argument(
+        "--save-sample-csv",
+        action="store_true",
+        help="Save per-test-sample predictions (pred/gt/path) CSV under workspace/plots.",
+    )
     args = parser.parse_args()
 
     main(
@@ -164,4 +285,5 @@ if __name__ == "__main__":
         checkpoint_path=args.checkpoint,
         workspace_path=args.workspace,
         dataset_name=args.dataset,
+        save_sample_csv=args.save_sample_csv,
     )
