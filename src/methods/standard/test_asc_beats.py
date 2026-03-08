@@ -9,12 +9,14 @@ from typing import Any, Dict, List
 import lightning.pytorch as pl
 import matplotlib.pyplot as plt
 import torch
+import torch.distributed as dist
 import yaml
 from lightning.pytorch.strategies import DDPStrategy
 from torch.nn.utils.rnn import pad_sequence
 
 from ...datamodule.dataloader import LoaderConfig, SingleDataLoader
 from ...datamodule.dataset import CLASSES
+from ...metrics.acc import top1_accuracy
 from .train_asc_beats import ASCBEATsSystem, ASCDataModule, DOMAIN_CHOICES
 
 DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")
@@ -130,36 +132,66 @@ def _build_test_loader_for_paths(
     return loader.dataloader
 
 
-def _collect_sample_rows(
-    system: ASCBEATsSystem,
-    dataloader,
-    idx2label: Dict[int, str],
-    domain: str,
-) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
-    device = next(system.parameters()).device
-    system.eval()
-    print(f"[CSV] collecting rows for domain={domain} on device={device} ...")
-    with torch.inference_mode():
-        for batch_idx, (waveforms, lengths, labels, paths) in enumerate(dataloader):
-            waveforms = waveforms.to(device)
-            lengths = lengths.to(device)
-            logits = system(waveforms, lengths)
-            preds = torch.argmax(logits, dim=1).detach().cpu().tolist()
-            gt = labels.detach().cpu().tolist()
-            for pred_idx, gt_idx, sample_path in zip(preds, gt, paths):
-                rows.append(
+class ASCBEATsEvalSystem(ASCBEATsSystem):
+    def __init__(self, cfg: Dict[str, Any], num_classes: int):
+        super().__init__(cfg=cfg, num_classes=num_classes)
+        self._collect_rows = False
+        self._rows: List[Dict[str, str]] = []
+        self._idx2label: Dict[int, str] = {}
+        self._domain = ""
+
+    def enable_sample_collection(self, idx2label: Dict[int, str], domain: str) -> None:
+        self._collect_rows = True
+        self._idx2label = idx2label
+        self._domain = domain
+        self._rows = []
+
+    def pop_rows(self) -> List[Dict[str, str]]:
+        rows = self._rows
+        self._rows = []
+        return rows
+
+    def test_step(self, batch, batch_idx: int) -> None:
+        if isinstance(batch, (tuple, list)) and len(batch) == 4:
+            waveforms, lengths, labels, paths = batch
+        else:
+            waveforms, lengths, labels = batch
+            paths = None
+
+        logits = self(waveforms, lengths)
+        loss = self.criterion(logits, labels)
+        acc = top1_accuracy(logits, labels)
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("test_acc", acc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+
+        if self._collect_rows and paths is not None:
+            pred_indices = torch.argmax(logits, dim=1).detach().cpu().tolist()
+            gt_indices = labels.detach().cpu().tolist()
+            for pred_idx, gt_idx, sample_path in zip(pred_indices, gt_indices, paths):
+                self._rows.append(
                     {
-                        "domain": domain,
-                        "pred_class": idx2label.get(int(pred_idx), str(int(pred_idx))),
-                        "gt_class": idx2label.get(int(gt_idx), str(int(gt_idx))),
+                        "domain": self._domain,
+                        "pred_class": self._idx2label.get(int(pred_idx), str(int(pred_idx))),
+                        "gt_class": self._idx2label.get(int(gt_idx), str(int(gt_idx))),
                         "sample_path": sample_path,
                     }
                 )
-            if (batch_idx + 1) % 100 == 0:
-                print(f"[CSV] domain={domain} processed_batches={batch_idx + 1}")
-    print(f"[CSV] collected rows for domain={domain}: {len(rows)}")
-    return rows
+
+
+def _gather_rows_across_ranks(local_rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    if not (dist.is_available() and dist.is_initialized()):
+        return local_rows
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    gathered = [None for _ in range(world_size)] if rank == 0 else None
+    dist.gather_object(local_rows, gathered, dst=0)
+    if rank != 0:
+        return []
+    merged: List[Dict[str, str]] = []
+    for rows in gathered:
+        if rows:
+            merged.extend(rows)
+    return merged
 
 
 def _save_sample_csv(csv_path: Path, rows: List[Dict[str, str]]) -> None:
@@ -228,15 +260,21 @@ def main(
     sample_rows: List[Dict[str, str]] = []
 
     for domain in test_domains:
-        print(f"[TEST] domain={domain}, checkpoint={checkpoint_path}")
-        datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx, dataset_name=domain)
-        system = ASCBEATsSystem.load_from_checkpoint(
+        if is_global_zero:
+            print(f"[TEST] domain={domain}, checkpoint={checkpoint_path}")
+        system = ASCBEATsEvalSystem.load_from_checkpoint(
             checkpoint_path,
             cfg=cfg,
             num_classes=len(label2idx),
             map_location="cpu",
         )
-        test_results = trainer.test(model=system, datamodule=datamodule)
+        if save_sample_csv:
+            system.enable_sample_collection(idx2label=idx2label, domain=domain)
+            test_loader = _build_test_loader_for_paths(cfg=cfg, label2idx=label2idx, domain=domain)
+            test_results = trainer.test(model=system, dataloaders=test_loader)
+        else:
+            datamodule = ASCDataModule(cfg=cfg, label2idx=label2idx, dataset_name=domain)
+            test_results = trainer.test(model=system, datamodule=datamodule)
         if not test_results and (world_size <= 1 or is_global_zero):
             raise RuntimeError(f"No test result returned for domain: {domain}")
         if test_results:
@@ -244,14 +282,11 @@ def main(
             domain_acc[domain] = acc
             if is_global_zero:
                 print(f"[RESULT] {domain}: test_acc={acc:.4f}")
-        if save_sample_csv and is_global_zero:
-            system = system.to(trainer.strategy.root_device)
-            path_loader = _build_test_loader_for_paths(cfg=cfg, label2idx=label2idx, domain=domain)
-            sample_rows.extend(
-                _collect_sample_rows(system=system, dataloader=path_loader, idx2label=idx2label, domain=domain)
-            )
-        if save_sample_csv and world_size > 1:
-            trainer.strategy.barrier()
+        if save_sample_csv:
+            local_rows = system.pop_rows()
+            gathered_rows = _gather_rows_across_ranks(local_rows)
+            if is_global_zero:
+                sample_rows.extend(gathered_rows)
 
     plots_dir = workspace / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
