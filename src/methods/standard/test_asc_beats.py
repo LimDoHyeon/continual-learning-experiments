@@ -220,6 +220,8 @@ def main(
         default_root_dir=str(workspace),
         logger=False,
     )
+    is_global_zero = bool(getattr(trainer, "is_global_zero", True))
+    world_size = int(getattr(trainer, "world_size", 1))
 
     test_domains: List[str] = list(DOMAIN_SEQUENCE) if dataset_name == "all" else [dataset_name]
     domain_acc: Dict[str, float] = {}
@@ -235,17 +237,21 @@ def main(
             map_location="cpu",
         )
         test_results = trainer.test(model=system, datamodule=datamodule)
-        if not test_results:
+        if not test_results and (world_size <= 1 or is_global_zero):
             raise RuntimeError(f"No test result returned for domain: {domain}")
-        acc = _extract_test_acc(test_results[0])
-        domain_acc[domain] = acc
-        print(f"[RESULT] {domain}: test_acc={acc:.4f}")
-        if save_sample_csv:
+        if test_results:
+            acc = _extract_test_acc(test_results[0])
+            domain_acc[domain] = acc
+            if is_global_zero:
+                print(f"[RESULT] {domain}: test_acc={acc:.4f}")
+        if save_sample_csv and is_global_zero:
             system = system.to(trainer.strategy.root_device)
             path_loader = _build_test_loader_for_paths(cfg=cfg, label2idx=label2idx, domain=domain)
             sample_rows.extend(
                 _collect_sample_rows(system=system, dataloader=path_loader, idx2label=idx2label, domain=domain)
             )
+        if save_sample_csv and world_size > 1:
+            trainer.strategy.barrier()
 
     plots_dir = workspace / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -254,20 +260,21 @@ def main(
 
     x_domains = list(domain_acc.keys())
     y_acc = [domain_acc[d] for d in x_domains]
-    plt.figure(figsize=(10, 5))
-    bars = plt.bar(x_domains, y_acc, color="steelblue")
-    plt.ylim(0.0, 1.0)
-    plt.xlabel("Domain")
-    plt.ylabel("Accuracy")
-    plt.title(f"Domain-wise Test Accuracy ({ckpt_stem})")
-    for bar, value in zip(bars, y_acc):
-        plt.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.3f}", ha="center", va="bottom")
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=200)
-    plt.close()
+    if is_global_zero:
+        plt.figure(figsize=(10, 5))
+        bars = plt.bar(x_domains, y_acc, color="steelblue")
+        plt.ylim(0.0, 1.0)
+        plt.xlabel("Domain")
+        plt.ylabel("Accuracy")
+        plt.title(f"Domain-wise Test Accuracy ({ckpt_stem})")
+        for bar, value in zip(bars, y_acc):
+            plt.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.3f}", ha="center", va="bottom")
+        plt.tight_layout()
+        plt.savefig(plot_path, dpi=200)
+        plt.close()
+        print(f"[PLOT] saved: {plot_path}")
 
-    print(f"[PLOT] saved: {plot_path}")
-    if save_sample_csv:
+    if save_sample_csv and is_global_zero:
         csv_path = plots_dir / f"{ckpt_stem}_sample_predictions.csv"
         _save_sample_csv(csv_path=csv_path, rows=sample_rows)
         print(f"[CSV] saved: {csv_path}")
