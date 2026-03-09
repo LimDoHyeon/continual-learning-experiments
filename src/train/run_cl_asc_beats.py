@@ -13,7 +13,7 @@ import yaml
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.strategies import DDPStrategy
 
-from ...datamodule.dataset import CLASSES
+from ..datamodule.dataset import CLASSES
 from .train_asc_beats import ASCBEATsSystem, ASCDataModule, build_logger
 
 DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")

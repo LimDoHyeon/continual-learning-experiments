@@ -16,18 +16,18 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 
-from ...datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
-from ...datamodule.dataset import CLASSES
-from ...losses.ce import build_cross_entropy_loss
-from ...losses.plasticity_cbp import (
+from ..datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
+from ..datamodule.dataset import CLASSES
+from ..losses.ce import build_cross_entropy_loss
+from ..losses.plasticity_cbp import (
     build_activation_name,
     build_cbp_config,
     create_gnt,
     make_activation_module,
     run_gnt_step,
 )
-from ...metrics.acc import top1_accuracy
-from ...models.BEATs.beats_backbone import make_beats_block
+from ..metrics.acc import top1_accuracy
+from ..models.BEATs.beats_backbone import make_beats_block
 
 DOMAIN_CHOICES = ("europe6", "lisbon", "lyon", "prague", "korea", "all")
 

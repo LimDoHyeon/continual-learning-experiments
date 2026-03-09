@@ -11,7 +11,7 @@ import torch
 import yaml
 from lightning.pytorch.strategies import DDPStrategy
 
-from ...datamodule.dataset import CLASSES
+from ..datamodule.dataset import CLASSES
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
 
 DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")

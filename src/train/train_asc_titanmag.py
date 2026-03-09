@@ -17,11 +17,18 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 
-from ...datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
-from ...datamodule.dataset import CLASSES
-from ...losses.ce import build_cross_entropy_loss
-from ...metrics.acc import top1_accuracy
-from ...models.titans.src.titan_backbone import make_titan_block
+from ..datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
+from ..datamodule.dataset import CLASSES
+from ..losses.ce import build_cross_entropy_loss
+from ..losses.plasticity_cbp import (
+    build_activation_name,
+    build_cbp_config,
+    create_gnt,
+    make_activation_module,
+    run_gnt_step,
+)
+from ..metrics.acc import top1_accuracy
+from ..models.titans.src.titan_backbone import make_titan_block
 
 DOMAIN_CHOICES = ("europe6", "lisbon", "lyon", "prague", "korea", "all")
 
@@ -135,6 +142,7 @@ class TitanASCModel(nn.Module):
     def __init__(self, cfg: Dict[str, Any], num_classes: int):
         super().__init__()
         mcfg = cfg["model"]
+        pcfg = cfg.get("plasticity", {})
 
         self.hop_length = int(mcfg["hop_length"])
         self.n_mels = int(mcfg["n_mels"])
@@ -152,21 +160,41 @@ class TitanASCModel(nn.Module):
         self.to_db = torchaudio.transforms.AmplitudeToDB(stype="power", top_db=80)
 
         self.input_proj = nn.Linear(self.n_mels, self.embed_dim)
-        self.backbone = make_titan_block(
-            dim=self.embed_dim,
-            heads=int(mcfg["heads"]),
-            head_dim=int(mcfg["head_dim"]),
-            window_size=int(mcfg["window_size"]),
-            num_persistent=int(mcfg["num_persistent"]),
-            store_chunk_size=int(mcfg["store_chunk_size"]),
-            max_ltm_lr=float(mcfg["max_ltm_lr"]),
-            ttt_batch_size=int(mcfg["ttt_batch_size"]),
-            max_grad_norm=float(mcfg["max_grad_norm"]),
-            test_time_update=bool(mcfg.get("test_time_update", True)),
-            # use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
+        num_blocks = int(mcfg.get("num_titan_blocks", 1))
+        self.backbone = nn.ModuleList(
+            [
+                make_titan_block(
+                    dim=self.embed_dim,
+                    heads=int(mcfg["heads"]),
+                    head_dim=int(mcfg["head_dim"]),
+                    window_size=int(mcfg["window_size"]),
+                    num_persistent=int(mcfg["num_persistent"]),
+                    store_chunk_size=int(mcfg["store_chunk_size"]),
+                    max_ltm_lr=float(mcfg["max_ltm_lr"]),
+                    ttt_batch_size=int(mcfg["ttt_batch_size"]),
+                    max_grad_norm=float(mcfg["max_grad_norm"]),
+                    test_time_update=bool(mcfg.get("test_time_update", True)),
+                    # use_accelerated_scan=bool(mcfg.get("use_accelerated_scan", False)),
+                )
+                for _ in range(num_blocks)
+            ]
         )
         self.norm = nn.LayerNorm(self.embed_dim)
-        self.classifier = nn.Linear(self.embed_dim, num_classes)
+        self.dropout = nn.Dropout(float(mcfg.get("dropout", 0.0)))
+        self.cbp_enabled = bool(pcfg.get("enabled", False))
+        self.cbp_act_type = build_activation_name(cfg)
+
+        if self.cbp_enabled:
+            cbp_hidden_dim = int(pcfg.get("head_hidden_dim", self.embed_dim))
+            self.cbp_hidden = nn.Linear(self.embed_dim, cbp_hidden_dim)
+            self.cbp_activation = make_activation_module(self.cbp_act_type)
+            self.classifier = nn.Linear(cbp_hidden_dim, num_classes)
+            self.cbp_layers = nn.ModuleList([self.cbp_hidden, self.cbp_activation, self.classifier])
+        else:
+            self.cbp_hidden = None
+            self.cbp_activation = None
+            self.classifier = nn.Linear(self.embed_dim, num_classes)
+            self.cbp_layers = None
 
     def _frame_mask(self, lengths: torch.Tensor, n_frames: int, device: torch.device) -> torch.Tensor:
         frame_lengths = torch.div(lengths, self.hop_length, rounding_mode="floor") + 1
@@ -174,17 +202,33 @@ class TitanASCModel(nn.Module):
         indices = torch.arange(n_frames, device=device).unsqueeze(0)
         return indices < frame_lengths.unsqueeze(1)
 
-    def forward(self, waveforms: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        waveforms: torch.Tensor,
+        lengths: torch.Tensor,
+        return_cbp_features: bool = False,
+    ):
         mel = self.to_db(self.melspec(waveforms))
         tokens = self.input_proj(mel.transpose(1, 2))
 
         mask = self._frame_mask(lengths=lengths, n_frames=tokens.shape[1], device=tokens.device)
-        features = self.backbone(tokens, attn_mask=mask)
+        features = tokens
+        for block in self.backbone:
+            features = block(features, attn_mask=mask)
         features = self.norm(features)
 
         denom = mask.sum(dim=1, keepdim=True).clamp(min=1).to(features.dtype)
         pooled = (features * mask.unsqueeze(-1)).sum(dim=1) / denom
-        return self.classifier(pooled)
+        cbp_features: List[torch.Tensor] = []
+        if self.cbp_enabled:
+            pooled = self.cbp_hidden(pooled)
+            pooled = self.cbp_activation(pooled)
+            cbp_features.append(pooled)
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)
+        if return_cbp_features:
+            return logits, cbp_features
+        return logits
 
 
 class ASCTitanMAGSystem(pl.LightningModule):
@@ -196,9 +240,34 @@ class ASCTitanMAGSystem(pl.LightningModule):
         self.model = TitanASCModel(cfg=cfg, num_classes=num_classes)
         label_smoothing = float(cfg.get("loss", {}).get("label_smoothing", 0.0))
         self.criterion = build_cross_entropy_loss(label_smoothing=label_smoothing)
+        self.cbp_cfg = build_cbp_config(cfg)
+        self.use_plasticity = self.cbp_cfg.enabled
+        self._gnt = None
+        self._latest_cbp_features: List[torch.Tensor] = []
+
+        if self.use_plasticity and self.model.cbp_layers is None:
+            raise ValueError("plasticity.enabled requires a valid CBP head.")
 
     def forward(self, waveforms: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
         return self.model(waveforms, lengths)
+
+    def on_fit_start(self) -> None:
+        if not self.use_plasticity:
+            return
+
+        if int(self.trainer.world_size) > 1:
+            raise RuntimeError("plasticity.enabled currently supports single-device training only.")
+
+        optimizer = self.optimizers(use_pl_optimizer=False)
+        if isinstance(optimizer, list):
+            optimizer = optimizer[0]
+        self._gnt = create_gnt(
+            layers=self.model.cbp_layers,
+            activation_name=self.model.cbp_act_type,
+            optimizer=optimizer,
+            config=self.cbp_cfg,
+            device=self.device,
+        )
 
     def _shared_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], stage: str) -> torch.Tensor:
         waveforms, lengths, labels = batch
@@ -211,7 +280,27 @@ class ASCTitanMAGSystem(pl.LightningModule):
         return loss
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        return self._shared_step(batch, stage="train")
+        waveforms, lengths, labels = batch
+        if self.use_plasticity:
+            logits, cbp_features = self.model(waveforms, lengths, return_cbp_features=True)
+            # Keep only detached activations so the autograd graph from this
+            # iteration is not kept alive across hooks/DDP bookkeeping.
+            self._latest_cbp_features = [feature.detach() for feature in cbp_features]
+        else:
+            logits = self(waveforms, lengths)
+            self._latest_cbp_features = []
+
+        loss = self.criterion(logits, labels)
+        acc = top1_accuracy(logits, labels)
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("train_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        return loss
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
+        super().optimizer_step(epoch, batch_idx, optimizer, optimizer_closure)
+        if self.use_plasticity and self._gnt is not None and self._latest_cbp_features:
+            run_gnt_step(self._gnt, self._latest_cbp_features)
+        self._latest_cbp_features = []
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         self._shared_step(batch, stage="val")
