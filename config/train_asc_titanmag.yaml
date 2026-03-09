@@ -54,14 +54,19 @@ model:
 
 loss:
   label_smoothing: 0.0
+  eaft:
+    enabled: true
+    alpha: 1.5
+    topk: 20
+    entropy_norm: 3.0
 
 plasticity:
-  enabled: false
+  enabled: true
   activation: relu
   head_hidden_dim: 384
-  replacement_rate: 0.001
-  maturity_threshold: 100
-  decay_rate: 0.9
+  replacement_rate: 0.0001
+  maturity_threshold: 1000
+  decay_rate: 0.99
   util_type: contribution
   init: kaiming
   accumulate: false
@@ -69,8 +74,8 @@ plasticity:
 optimizer:
   lr: 0.0002
   weight_decay: 0.01
-  beta1: 0.9
-  beta2: 0.999
+  beta1: 0.99
+  beta2: 0.99
 
 scheduler:
   eta_min: 0.000001

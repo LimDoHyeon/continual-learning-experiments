@@ -56,6 +56,10 @@ def run_continual(
     workspace_path: str,
     resume_from: Optional[str],
     disable_wandb: bool,
+    enable_eaft: bool,
+    eaft_alpha: Optional[float],
+    eaft_topk: Optional[int],
+    eaft_entropy_norm: Optional[float],
 ) -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
@@ -77,6 +81,20 @@ def run_continual(
         cfg = deepcopy(base_cfg)
         cfg.setdefault("train", {})
         cfg["train"]["max_epochs"] = 30
+        cfg.setdefault("loss", {})
+        loss_cfg = cfg["loss"]
+        eaft_cfg = loss_cfg.get("eaft", {})
+        if not isinstance(eaft_cfg, dict):
+            eaft_cfg = {}
+        if enable_eaft or eaft_alpha is not None or eaft_topk is not None or eaft_entropy_norm is not None:
+            eaft_cfg["enabled"] = True
+        if eaft_alpha is not None:
+            eaft_cfg["alpha"] = float(eaft_alpha)
+        if eaft_topk is not None:
+            eaft_cfg["topk"] = int(eaft_topk)
+        if eaft_entropy_norm is not None:
+            eaft_cfg["entropy_norm"] = float(eaft_entropy_norm)
+        loss_cfg["eaft"] = eaft_cfg
         cfg.setdefault("logging", {})
         cfg["logging"]["save_top_k"] = 0
         if disable_wandb:
@@ -149,6 +167,29 @@ if __name__ == "__main__":
         action="store_true",
         help="Disable wandb and use CSV logger instead.",
     )
+    parser.add_argument(
+        "--enable-eaft",
+        action="store_true",
+        help="Enable EAFT weighted loss for every continual-learning stage.",
+    )
+    parser.add_argument(
+        "--eaft-alpha",
+        type=float,
+        default=None,
+        help="Optional EAFT alpha. If set, EAFT is enabled automatically.",
+    )
+    parser.add_argument(
+        "--eaft-topk",
+        type=int,
+        default=None,
+        help="Optional EAFT top-k for entropy approximation.",
+    )
+    parser.add_argument(
+        "--eaft-entropy-norm",
+        type=float,
+        default=None,
+        help="Optional EAFT entropy normalization constant.",
+    )
     args = parser.parse_args()
 
     run_continual(
@@ -156,4 +197,8 @@ if __name__ == "__main__":
         workspace_path=args.workspace,
         resume_from=args.resume_from,
         disable_wandb=args.disable_wandb,
+        enable_eaft=args.enable_eaft,
+        eaft_alpha=args.eaft_alpha,
+        eaft_topk=args.eaft_topk,
+        eaft_entropy_norm=args.eaft_entropy_norm,
     )

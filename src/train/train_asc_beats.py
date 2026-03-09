@@ -19,6 +19,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from ..datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
 from ..datamodule.dataset import CLASSES
 from ..losses.ce import build_cross_entropy_loss
+from ..losses.eaft import compute_eaft_token_loss
 from ..losses.plasticity_cbp import (
     build_activation_name,
     build_cbp_config,
@@ -181,6 +182,7 @@ class BEATsASCModel(nn.Module):
         waveforms: torch.Tensor,
         lengths: torch.Tensor,
         return_cbp_features: bool = False,
+        return_token_info: bool = False,
     ):
         features, padding_mask = self.backbone(
             waveforms=waveforms,
@@ -196,17 +198,26 @@ class BEATsASCModel(nn.Module):
         else:
             valid_mask = ~padding_mask
 
-        denom = valid_mask.sum(dim=1, keepdim=True).clamp(min=1).to(features.dtype)
-        pooled = (features * valid_mask.unsqueeze(-1)).sum(dim=1) / denom
+        token_features = features
+        denom = valid_mask.sum(dim=1, keepdim=True).clamp(min=1).to(token_features.dtype)
         cbp_features: List[torch.Tensor] = []
         if self.cbp_enabled:
-            pooled = self.cbp_hidden(pooled)
-            pooled = self.cbp_activation(pooled)
+            token_features = self.cbp_hidden(token_features)
+            token_features = self.cbp_activation(token_features)
+
+        pooled = (token_features * valid_mask.unsqueeze(-1)).sum(dim=1) / denom
+        if self.cbp_enabled:
             cbp_features.append(pooled)
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)
+        logits = self.classifier(self.dropout(pooled))
+
+        if return_cbp_features and return_token_info:
+            token_logits = self.classifier(self.dropout(token_features))
+            return logits, cbp_features, token_logits, valid_mask
         if return_cbp_features:
             return logits, cbp_features
+        if return_token_info:
+            token_logits = self.classifier(self.dropout(token_features))
+            return logits, token_logits, valid_mask
         return logits
 
 
@@ -217,7 +228,18 @@ class ASCBEATsSystem(pl.LightningModule):
         self.save_hyperparameters(ignore=["cfg"])
 
         self.model = BEATsASCModel(cfg=cfg, num_classes=num_classes)
-        label_smoothing = float(cfg.get("loss", {}).get("label_smoothing", 0.0))
+        loss_cfg = cfg.get("loss", {})
+        label_smoothing = float(loss_cfg.get("label_smoothing", 0.0))
+        eaft_cfg = loss_cfg.get("eaft", {})
+        if not isinstance(eaft_cfg, dict):
+            eaft_cfg = {}
+
+        self.label_smoothing = label_smoothing
+        self.eaft_enabled = bool(eaft_cfg.get("enabled", False))
+        self.eaft_alpha = float(eaft_cfg.get("alpha", 1.0))
+        self.eaft_topk = int(eaft_cfg.get("topk", 20))
+        self.eaft_entropy_norm = float(eaft_cfg.get("entropy_norm", 3.0))
+
         self.criterion = build_cross_entropy_loss(label_smoothing=label_smoothing)
         self.cbp_cfg = build_cbp_config(cfg)
         self.use_plasticity = self.cbp_cfg.enabled
@@ -257,16 +279,38 @@ class ASCBEATsSystem(pl.LightningModule):
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         waveforms, lengths, labels = batch
-        if self.use_plasticity:
-            logits, cbp_features = self.model(waveforms, lengths, return_cbp_features=True)
+        token_logits = None
+        token_mask = None
+        if self.use_plasticity and self.eaft_enabled:
+            logits, cbp_features, token_logits, token_mask = self.model(
+                waveforms, lengths, return_cbp_features=True, return_token_info=True)
             # Keep only detached activations so the autograd graph from this
             # iteration is not kept alive across hooks/DDP bookkeeping.
             self._latest_cbp_features = [feature.detach() for feature in cbp_features]
+        elif self.use_plasticity:
+            logits, cbp_features = self.model(waveforms, lengths, return_cbp_features=True)
+            self._latest_cbp_features = [feature.detach() for feature in cbp_features]
+        elif self.eaft_enabled:
+            logits, token_logits, token_mask = self.model(waveforms, lengths, return_token_info=True)
+            self._latest_cbp_features = []
         else:
             logits = self(waveforms, lengths)
             self._latest_cbp_features = []
 
-        loss = self.criterion(logits, labels)
+        if self.eaft_enabled:
+            loss, eaft_stats = compute_eaft_token_loss(
+                token_logits=token_logits,
+                labels=labels,
+                token_mask=token_mask,
+                alpha=self.eaft_alpha,
+                entropy_norm=self.eaft_entropy_norm,
+                topk=self.eaft_topk,
+                label_smoothing=self.label_smoothing,
+            )
+            self.log("train_eaft_weight_mean", eaft_stats["weight_mean"], on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+            self.log("train_eaft_entropy_mean", eaft_stats["entropy_mean"], on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        else:
+            loss = self.criterion(logits, labels)
         acc = top1_accuracy(logits, labels)
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("train_acc", acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
