@@ -77,7 +77,7 @@ def run_continual(
 
     prev_ckpt = Path(resume_from).resolve() if resume_from is not None else None
 
-    for domain in DOMAIN_SEQUENCE:
+    for domain_idx, domain in enumerate(DOMAIN_SEQUENCE):
         cfg = deepcopy(base_cfg)
         cfg.setdefault("train", {})
         cfg["train"]["max_epochs"] = 30
@@ -86,8 +86,11 @@ def run_continual(
         eaft_cfg = loss_cfg.get("eaft", {})
         if not isinstance(eaft_cfg, dict):
             eaft_cfg = {}
-        if enable_eaft or eaft_alpha is not None or eaft_topk is not None or eaft_entropy_norm is not None:
-            eaft_cfg["enabled"] = True
+        eaft_requested = bool(eaft_cfg.get("enabled", False)) or enable_eaft
+        eaft_requested = eaft_requested or eaft_alpha is not None or eaft_topk is not None or eaft_entropy_norm is not None
+        if eaft_requested:
+            # Apply EAFT from the second domain onward.
+            eaft_cfg["enabled"] = domain_idx > 0
         if eaft_alpha is not None:
             eaft_cfg["alpha"] = float(eaft_alpha)
         if eaft_topk is not None:
