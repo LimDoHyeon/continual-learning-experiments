@@ -14,13 +14,7 @@ import yaml
 from lightning.pytorch.strategies import DDPStrategy
 from torch.nn.utils.rnn import pad_sequence
 
-<<<<<<< HEAD:src/train/test_asc_titanmag.py
 from ..datamodule.dataset import CLASSES
-=======
-from ...datamodule.dataloader import LoaderConfig, SingleDataLoader
-from ...datamodule.dataset import CLASSES
-from ...metrics.acc import top1_accuracy
->>>>>>> 95788361ed14adc98e3af19a48cbea3e63e4c9be:src/methods/standard/test_asc_titanmag.py
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
 
 DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")
