@@ -79,7 +79,6 @@ def run_continual(
         cfg["train"]["max_epochs"] = 30
         cfg.setdefault("logging", {})
         cfg["logging"]["save_top_k"] = 0
-        cfg["logging"]["run_name"] = f"cl_train_asc_beats_{domain}"
         if disable_wandb:
             cfg["logging"]["use_wandb"] = False
 

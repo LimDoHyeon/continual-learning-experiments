@@ -52,7 +52,7 @@ class ASCDataModule(pl.LightningDataModule):
             waveform, label = item
 
             if waveform.ndim == 2:
-                waveform = waveform.mean(dim=0)
+                waveform = waveform[0]
             elif waveform.ndim > 2:
                 waveform = waveform.reshape(-1)
 
@@ -233,9 +233,6 @@ class ASCBEATsSystem(pl.LightningModule):
     def on_fit_start(self) -> None:
         if not self.use_plasticity:
             return
-
-        if int(self.trainer.world_size) > 1:
-            raise RuntimeError("plasticity.enabled currently supports single-device training only.")
 
         optimizer = self.optimizers(use_pl_optimizer=False)
         if isinstance(optimizer, list):

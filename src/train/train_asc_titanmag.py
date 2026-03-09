@@ -54,7 +54,7 @@ class ASCDataModule(pl.LightningDataModule):
             waveform, label = item
 
             if waveform.ndim == 2:
-                waveform = waveform.mean(dim=0)
+                waveform = waveform[0]
             elif waveform.ndim > 2:
                 waveform = waveform.reshape(-1)
 
