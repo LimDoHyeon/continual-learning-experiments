@@ -14,9 +14,7 @@ import yaml
 from lightning.pytorch.strategies import DDPStrategy
 from torch.nn.utils.rnn import pad_sequence
 
-from ..datamodule.dataloaderv2 import LoaderConfig, SingleDataLoader
 from ..datamodule.datasetv2 import CLASSES
-from ..metrics.acc import top1_accuracy
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
 
 DOMAIN_SEQUENCE = (
