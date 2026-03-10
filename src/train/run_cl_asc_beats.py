@@ -13,10 +13,21 @@ import yaml
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.strategies import DDPStrategy
 
-from ..datamodule.dataset import CLASSES
+from ..datamodule.datasetv2 import CLASSES
 from .train_asc_beats import ASCBEATsSystem, ASCDataModule, build_logger
 
-DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")
+DOMAIN_SEQUENCE = (
+    "lisbon",
+    "lyon",
+    "prague",
+    "barcelona",
+    "helsinki",
+    "london",
+    "milan",
+    "paris",
+    "stockholm",
+    "vienna",
+)
 
 
 def _build_strategy(train_cfg: Dict[str, Any]):
@@ -156,14 +167,14 @@ def run_continual(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Continual ASC training with BEATs backbone")
-    parser.add_argument("-c", "--config", type=str, default="config/train_asc_beats.yaml")
+    parser.add_argument("-c", "--config", type=str, default="config/train_asc_beats_v2.yaml")
     parser.add_argument("-w", "--workspace", type=str, default="workspace/run_cl_asc_beats")
     parser.add_argument(
         "-r",
         "--resume-from",
         type=str,
         default=None,
-        help="Optional warm-start checkpoint for the first domain(europe6).",
+        help="Optional warm-start checkpoint for the first domain(lisbon).",
     )
     parser.add_argument(
         "--disable-wandb",

@@ -14,10 +14,23 @@ import yaml
 from lightning.pytorch.strategies import DDPStrategy
 from torch.nn.utils.rnn import pad_sequence
 
-from ..datamodule.dataset import CLASSES
+from ..datamodule.dataloaderv2 import LoaderConfig, SingleDataLoader
+from ..datamodule.datasetv2 import CLASSES
+from ..metrics.acc import top1_accuracy
 from .train_asc_titanmag import ASCDataModule, ASCTitanMAGSystem, DOMAIN_CHOICES
 
-DOMAIN_SEQUENCE = ("europe6", "lisbon", "lyon", "prague", "korea")
+DOMAIN_SEQUENCE = (
+    "lisbon",
+    "lyon",
+    "prague",
+    "barcelona",
+    "helsinki",
+    "london",
+    "milan",
+    "paris",
+    "stockholm",
+    "vienna",
+)
 
 
 def _extract_test_acc(metrics: Dict[str, Any]) -> float:
@@ -118,14 +131,17 @@ def _build_test_loader_for_paths(
         target_sample_rate=int(dcfg["target_sample_rate"]),
         return_path=True,
         collate_fn=_collate_batch_with_paths,
-        europe6_root=dcfg["europe6_root"],
-        europe6_meta=dcfg.get("europe6_meta", "meta.csv"),
         tau2019_root=dcfg["tau2019_root"],
         lisbon_meta=dcfg.get("lisbon_meta", "lisbon_meta.csv"),
         lyon_meta=dcfg.get("lyon_meta", "lyon_meta.csv"),
         prague_meta=dcfg.get("prague_meta", "prague_meta.csv"),
-        korea_root=dcfg["korea_root"],
-        korea_csv=dcfg.get("korea_csv", "cochlscene_meta.csv"),
+        barcelona_meta=dcfg.get("barcelona_meta", "barcelona_meta.csv"),
+        helsinki_meta=dcfg.get("helsinki_meta", "helsinki_meta.csv"),
+        london_meta=dcfg.get("london_meta", "london_meta.csv"),
+        milan_meta=dcfg.get("milan_meta", "milan_meta.csv"),
+        paris_meta=dcfg.get("paris_meta", "paris_meta.csv"),
+        stockholm_meta=dcfg.get("stockholm_meta", "stockholm_meta.csv"),
+        vienna_meta=dcfg.get("vienna_meta", "vienna_meta.csv"),
     )
     return loader.dataloader
 
@@ -315,7 +331,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test ASC with Titans MAG backbone")
-    parser.add_argument("-c", "--config", type=str, default="config/train_asc_titanmag.yaml")
+    parser.add_argument("-c", "--config", type=str, default="config/train_asc_titanmag_v2.yaml")
     parser.add_argument("-k", "--checkpoint", type=str, required=True)
     parser.add_argument("-w", "--workspace", type=str, default="workspace/test_asc_titanmag")
     parser.add_argument("-d", "--dataset", type=str, default="all", choices=DOMAIN_CHOICES)

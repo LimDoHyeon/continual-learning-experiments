@@ -10,6 +10,8 @@ import torchaudio  # torchaudio.load 사용
 
 # TUT2018, TAU2019
 # NOTE: cochl's different class-names are converted correctly based on below.
+# NOTE: This setup differs each dataset's number of classes. This can cause performance degradation.
+#       DIL should have same number of classes for each other datasets.
 CLASSES = {"airport": 0, "bus": 1, "metro": 2, "metro_station": 3, "park": 4, "public_square": 5,
            "shopping_mall": 6, "street_pedestrian": 7, "street_traffic": 8, "tram": 9}
 

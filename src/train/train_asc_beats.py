@@ -16,8 +16,8 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 
-from ..datamodule.dataloader import AllDataLoader, LoaderConfig, SingleDataLoader
-from ..datamodule.dataset import CLASSES
+from ..datamodule.dataloaderv2 import AllDataLoader, LoaderConfig, SingleDataLoader
+from ..datamodule.datasetv2 import CLASSES
 from ..losses.ce import build_cross_entropy_loss
 from ..losses.eaft import compute_eaft_token_loss
 from ..losses.plasticity_cbp import (
@@ -30,7 +30,19 @@ from ..losses.plasticity_cbp import (
 from ..metrics.acc import top1_accuracy
 from ..models.BEATs.beats_backbone import make_beats_block
 
-DOMAIN_CHOICES = ("europe6", "lisbon", "lyon", "prague", "korea", "all")
+DOMAIN_CHOICES = (
+    "lisbon",
+    "lyon",
+    "prague",
+    "barcelona",
+    "helsinki",
+    "london",
+    "milan",
+    "paris",
+    "stockholm",
+    "vienna",
+    "all",
+)
 
 
 class ASCDataModule(pl.LightningDataModule):
@@ -86,14 +98,17 @@ class ASCDataModule(pl.LightningDataModule):
             "target_sample_rate": int(dcfg["target_sample_rate"]),
             "return_path": False,
             "collate_fn": self._collate_batch,
-            "europe6_root": dcfg["europe6_root"],
-            "europe6_meta": dcfg.get("europe6_meta", "meta.csv"),
             "tau2019_root": dcfg["tau2019_root"],
             "lisbon_meta": dcfg.get("lisbon_meta", "lisbon_meta.csv"),
             "lyon_meta": dcfg.get("lyon_meta", "lyon_meta.csv"),
             "prague_meta": dcfg.get("prague_meta", "prague_meta.csv"),
-            "korea_root": dcfg["korea_root"],
-            "korea_csv": dcfg.get("korea_csv", "cochlscene_meta.csv"),
+            "barcelona_meta": dcfg.get("barcelona_meta", "barcelona_meta.csv"),
+            "helsinki_meta": dcfg.get("helsinki_meta", "helsinki_meta.csv"),
+            "london_meta": dcfg.get("london_meta", "london_meta.csv"),
+            "milan_meta": dcfg.get("milan_meta", "milan_meta.csv"),
+            "paris_meta": dcfg.get("paris_meta", "paris_meta.csv"),
+            "stockholm_meta": dcfg.get("stockholm_meta", "stockholm_meta.csv"),
+            "vienna_meta": dcfg.get("vienna_meta", "vienna_meta.csv"),
         }
         all_loader_kwargs = {**common_kwargs, "return_domain": False}
 
@@ -449,7 +464,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train ASC with BEATs backbone")
-    parser.add_argument("-c", "--config", type=str, default="config/train_asc_beats.yaml")
+    parser.add_argument("-c", "--config", type=str, default="config/train_asc_beats_v2.yaml")
     parser.add_argument("-r", "--resume", type=str, default=None)
     parser.add_argument("-w", "--workspace", type=str, default="workspace/train_asc_beats")
     parser.add_argument("-id", "--wandb-id", type=str, default=None)
